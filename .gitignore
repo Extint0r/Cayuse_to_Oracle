@@ -1,0 +1,31 @@
+# ==========================================
+# INSTITUTIONAL MASTER DATA PROTECTIONS
+# ==========================================
+# Block all raw financial transaction ledger workbooks (including copies)
+*True Up*.xlsx
+*True Up*.xls
+*Grant Summary*.xlsx
+*Grant Summary*.xls
+
+# Block local desktop SQLite relational staging databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Block local processing output sheets
+Master_Sponsor_Crosswalk_Index.xlsx
+Master_Sponsor_Translation_Index.xlsx
+
+# ==========================================
+# SYSTEM & ENVIRONMENT RUNTIME OVERRIDES
+# ==========================================
+# Block Python execution caches and compiled bytecode logs
+__pycache__/
+*.py[cod]
+*$*.py
+
+# Block temporary OS environment lock files
+.DS_Store
+Thumbs.db
+~$*.xlsx
+~$*.xls
