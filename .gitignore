@@ -1,4 +1,9 @@
 # ==========================================
+# CREDENTIAL & CONFIGURATION SHIELDS
+# ==========================================
+secrets.json
+
+# ==========================================
 # INSTITUTIONAL MASTER DATA PROTECTIONS
 # ==========================================
 # Block all raw financial transaction ledger workbooks (including copies)
