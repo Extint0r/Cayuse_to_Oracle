@@ -219,7 +219,7 @@ for string_item in sorted(all_unique_strings):
 conn.commit()
 
 # ==========================================
-# 5. EXPORT FINALIZED LOOKUP REFERENCE VIEW
+# 5. EXPORT FINALIZED LOOKUP REFERENCE VIEW 
 # ==========================================
 final_query = """
     SELECT 
