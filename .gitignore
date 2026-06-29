@@ -11,6 +11,7 @@ secrets.json
 *True Up*.xls
 *Grant Summary*.xlsx
 *Grant Summary*.xls
+*Ecosystem_True_Up_Audit.xlsx
 
 # Block local desktop SQLite relational staging databases
 *.db
