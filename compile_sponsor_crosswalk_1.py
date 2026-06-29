@@ -1,13 +1,8 @@
 import os
 import re
-import json
-import time 
 import sqlite3
 import pandas as pd
-import numpy as np
-import requests
 from openpyxl.worksheet.table import Table, TableStyleInfo
-from openpyxl.utils import get_column_letter
 
 # ==========================================
 # ENVIRONMENT & AUTOMATED CONFIGURATION
@@ -15,37 +10,17 @@ from openpyxl.utils import get_column_letter
 MASTER_INPUT = "Cayuse-Oracle award True Up - jth6-Copy.xlsx"
 OUTPUT_FILE = "Master_Sponsor_Crosswalk_Index.xlsx"
 DB_FILE = "rice_sponsor_mdm.db"
-SECRETS_FILE = "secrets.json"
 
-# Authoritative GSA Federal Hierarchy API Endpoint
-SAM_FH_API_URL = "https://api.sam.gov/prod/federalorganizations/v1/orgs"
+print("📊 Launching Master Relational Report Compiler (Database-Connected Version)...")
 
-print("📊 Launching Relational SAM.gov Live API Deep-Hierarchy Pipeline...")
-
-if not os.path.exists(MASTER_INPUT):
-    print(f"❌ Error: Cannot find master workbook '{MASTER_INPUT}' in this folder.")
+if not os.path.exists(MASTER_INPUT) or not os.path.exists(DB_FILE):
+    print("❌ Error: Missing master input spreadsheet or verified database cache file.")
     exit()
 
-# Securely load credentials from the protected secrets manifest file
-SAM_API_KEY = "DEMO_KEY"
-if os.path.exists(SECRETS_FILE):
-    try:
-        with open(SECRETS_FILE, "r") as f:
-            config_data = json.load(f)
-            SAM_API_KEY = config_data.get("SAM_API_KEY", "DEMO_KEY")
-        print("🔑 Secure API credentials loaded successfully from secrets.json.")
-    except Exception as e:
-        print(f"⚠️ Error reading configuration file secrets.json: {e}. Defaulting to safe mode.")
-else:
-    print("ℹ️ secrets.json missing. Running in safe fallback mode using local cache rules.")
-
-# ==========================================
-# 1. INITIALIZE RELATIONAL SYSTEM STORAGE
-# ==========================================
 conn = sqlite3.connect(DB_FILE)
 cursor = conn.cursor()
 
-# Table A: Permanent local repository caching verified federal agency paths
+# Self-healing database check to ensure federal tables exist
 cursor.execute("""
     CREATE TABLE IF NOT EXISTS ref_sam_federal_hierarchy (
         agency_string_key TEXT PRIMARY KEY,
@@ -55,33 +30,10 @@ cursor.execute("""
     );
 """)
 
-# Table B: Workspace staging table tracking unique organizational row maps
-cursor.execute("DROP TABLE IF EXISTS staging_sponsor_inputs;")
-cursor.execute("""
-    CREATE TABLE staging_sponsor_inputs (
-        string_id INTEGER PRIMARY KEY AUTOINCREMENT,
-        oracle_sponsor_string TEXT UNIQUE,
-        cayuse_sponsor_string TEXT,
-        usaspending_top_tier TEXT DEFAULT 'N/A',
-        usaspending_sub_tier TEXT DEFAULT 'N/A',
-        sam_gov_certified_name TEXT,
-        sponsor_taxonomy_class TEXT,
-        match_derivation_method TEXT
-    );
-""")
-conn.commit()
-
-# ==============================================================================
-# 2. SEED THE PROTOCOL WITH THE COMPLETE IMMUTABLE PORTFOLIO AUTHORITY REFERENCE MAP
-# ==============================================================================
-print("🗂️ Seeding 100% Portfolio-Complete Master Authority Naming Grid into database...")
 authority_reference_matrix = [
-    # United States Department of Agriculture (USDA) Portfolio
     ('USDA NATIONAL INSTITUTE OF FOOD AND AGRICULTURE', 'DEPARTMENT OF AGRICULTURE (USDA)', 'NATIONAL INSTITUTE OF FOOD AND AGRICULTURE (NIFA)', '012'),
     ('USDA FOREST SERVICE', 'DEPARTMENT OF AGRICULTURE (USDA)', 'FOREST SERVICE (FS)', '012'),
     ('UNITED STATES DEPARTMENT OF AGRICULTURE', 'DEPARTMENT OF AGRICULTURE (USDA)', 'DEPARTMENT OF AGRICULTURE (USDA)', '012'),
-
-    # Health and Human Services / NIH / CDC Portfolio
     ('ADVANCED RESEARCH PROJECTS AGENCY FOR HEALTH (ARPA-H)', 'DEPARTMENT OF HEALTH AND HUMAN SERVICES (HHS)', 'ADVANCED RESEARCH PROJECTS AGENCY FOR HEALTH (ARPA-H)', '075'),
     ('NATIONAL INSTITUTES OF HEALTH', 'DEPARTMENT OF HEALTH AND HUMAN SERVICES (HHS)', 'NATIONAL INSTITUTES OF HEALTH (NIH)', '075'),
     ('NATIONAL INSTITUTES OF HEALTH NIH DO NOT USE', 'DEPARTMENT OF HEALTH AND HUMAN SERVICES (HHS)', 'NATIONAL INSTITUTES OF HEALTH (NIH)', '075'),
@@ -90,19 +42,13 @@ authority_reference_matrix = [
     ('DHHS HEALTH RESOURCES AND SERVICES ADMINISTRATION', 'DEPARTMENT OF HEALTH AND HUMAN SERVICES (HHS)', 'HEALTH RESOURCES AND SERVICES ADMINISTRATION (HRSA)', '075'),
     ('DEPARTMENT OF HEALTH AND HUMAN SERVICES ADMINISTRATION FOR CHILDREN AND FAMILIES', 'DEPARTMENT OF HEALTH AND HUMAN SERVICES (HHS)', 'ADMINISTRATION FOR CHILDREN AND FAMILIES (ACF)', '075'),
     ('DEPARTMENT OF HEALTH AND HUMAN SERVICES ADMINISTRATION FOR COMMUNITY LIVING', 'DEPARTMENT OF HEALTH AND HUMAN SERVICES (HHS)', 'ADMINISTRATION FOR COMMUNITY LIVING (ACL)', '075'),
-
-    # National Science Foundation Portfolio
     ('NATIONAL SCIENCE FOUNDATION', 'NATIONAL SCIENCE FOUNDATION (NSF)', 'NATIONAL SCIENCE FOUNDATION (NSF)', '049'),
-    
-    # NASA Operating Center Portfolio
     ('NASA HEADQUARTERS', 'NATIONAL AERONAUTICS AND SPACE ADMINISTRATION (NASA)', 'NASA HEADQUARTERS', '080'),
     ('NASA JOHNSON SPACE CENTER (JSC)', 'NATIONAL AERONAUTICS AND SPACE ADMINISTRATION (NASA)', 'NASA JOHNSON SPACE CENTER (JSC)', '080'),
     ('NASA LANGLEY RESEARCH CENTER', 'NATIONAL AERONAUTICS AND SPACE ADMINISTRATION (NASA)', 'NASA LANGLEY RESEARCH CENTER', '080'),
     ('NATIONAL AERONAUTICS AND SPACE ADMINISTRATION GODDARD', 'NATIONAL AERONAUTICS AND SPACE ADMINISTRATION (NASA)', 'NASA GODDARD SPACE FLIGHT CENTER', '080'),
     ('NASA SHARED SERVICES CENTER NSSC', 'NATIONAL AERONAUTICS AND SPACE ADMINISTRATION (NASA)', 'NASA SHARED SERVICES CENTER (NSSC)', '080'),
     ('JET PROPULSION LABORATORY, CALIFORNIA INSTITUTE OF TECHNOLOGY', 'NATIONAL AERONAUTICS AND SPACE ADMINISTRATION (NASA)', 'JET PROPULSION LABORATORY (JPL)', '080'),
-
-    # Deep-Hierarchy Department of Defense (DOD) Commands
     ('DEPARTMENT OF DEFENSE AIR FORCE OFFICE OF SCIENTIFIC RESEARCH', 'DEPARTMENT OF DEFENSE (DOD)', 'AIR FORCE OFFICE OF SCIENTIFIC RESEARCH (AFOSR)', '097'),
     ('DEPARTMENT OF DEFENSE AIR FORCE RESEARCH LABORATORY', 'DEPARTMENT OF DEFENSE (DOD)', 'AIR FORCE RESEARCH LABORATORY (AFRL)', '097'),
     ('DEPARTMENT OF DEFENSE ARMY RESEARCH INSTITUTE BEHAVIORAL AND SOC SCI ARI', 'DEPARTMENT OF DEFENSE (DOD)', 'US ARMY RESEARCH INSTITUTE (ARI)', '097'),
@@ -125,8 +71,6 @@ authority_reference_matrix = [
     ('US ARMY CONTRACTING COMMAND NEW JERSEY', 'DEPARTMENT OF DEFENSE (DOD)', 'US ARMY CONTRACTING COMMAND', '097'),
     ('US ARMY MEDICAL RESEARCH AND DEVELOPMENT COMMAND USAMRDC', 'DEPARTMENT OF DEFENSE (DOD)', 'US ARMY MEDICAL RESEARCH AND DEVELOPMENT COMMAND', '097'),
     ('MARYLAND PROCUREMENT OFFICE', 'DEPARTMENT OF DEFENSE (DOD)', 'MARYLAND PROCUREMENT OFFICE (MPO)', '097'),
-
-    # Granular Department of Energy (DOE) & National Laboratories (FFRDCs)
     ('ARGONNE NATIONAL LABORATORY', 'DEPARTMENT OF ENERGY (DOE)', 'ARGONNE NATIONAL LABORATORY', '089'),
     ('BROOKHAVEN NATIONAL LABORATORY', 'DEPARTMENT OF ENERGY (DOE)', 'BROOKHAVEN NATIONAL LABORATORY', '089'),
     ('DEPARTMENT OF ENERGY NATIONAL NUCLEAR SECURITY ADMINISTRATION', 'DEPARTMENT OF ENERGY (DOE)', 'NATIONAL NUCLEAR SECURITY ADMINISTRATION (NNSA)', '089'),
@@ -141,18 +85,15 @@ authority_reference_matrix = [
     ('SLAC NATIONAL ACCELERATOR LABORATORY', 'DEPARTMENT OF ENERGY (DOE)', 'SLAC NATIONAL ACCELERATOR LABORATORY', '089'),
     ('FERMI NATIONAL ACCELERATOR LAB', 'DEPARTMENT OF ENERGY (DOE)', 'FERMI NATIONAL ACCELERATOR LABORATORY', '089'),
     ('SANDIA NATIONAL LABORATORIES', 'DEPARTMENT OF ENERGY (DOE)', 'SANDIA NATIONAL LABORATORIES', '089'),
+    ('THOMAS JEFFERSON NATIONAL ACCELERATOR FACILITY', 'DEPARTMENT OF ENERGY (DOE)', 'THOMAS JEFFERSON NATIONAL ACCELERATOR FACILITY', '089'),
     ('OFFICE OF ENERGY EFFICIENCY AND RENEWABLE ENERGY EERE', 'DEPARTMENT OF ENERGY (DOE)', 'OFFICE OF ENERGY EFFICIENCY AND RENEWABLE ENERGY (EERE)', '089'),
     ('UNIVERSITY OF CALIFORNIA ERNEST ORLANDO LAWRENCE BERKELEY NATIONAL LABORATORY', 'DEPARTMENT OF ENERGY (DOE)', 'LAWRENCE BERKELEY NATIONAL LABORATORY', '089'),
-
-    # Department of Commerce Portfolio
     ('DEPARTMENT OF COMMERCE MBDA', 'DEPARTMENT OF COMMERCE (DOC)', 'MINORITY BUSINESS DEVELOPMENT AGENCY (MBDA)', '013'),
     ('DEPARTMENT OF COMMERCE NIST 13060001 01', 'DEPARTMENT OF COMMERCE (DOC)', 'NATIONAL INSTITUTE OF STANDARDS AND TECHNOLOGY (NIST)', '013'),
     ('DEPARTMENT OF COMMERCE NIST NON LOC', 'DEPARTMENT OF COMMERCE (DOC)', 'NATIONAL INSTITUTE OF STANDARDS AND TECHNOLOGY (NIST)', '013'),
     ('DEPARTMENT OF COMMERCE US CENSUS BUREAU', 'DEPARTMENT OF COMMERCE (DOC)', 'BUREAU OF THE CENSUS', '013'),
     ('NATIONAL OCEANIC ATMOSPHERIC ADMINISTRATION', 'DEPARTMENT OF COMMERCE (DOC)', 'NATIONAL OCEANIC AND ATMOSPHERIC ADMINISTRATION (NOAA)', '013'),
     ('US ECONOMIC DEVELOPMENT ADMINISTRATION', 'DEPARTMENT OF COMMERCE (DOC)', 'ECONOMIC DEVELOPMENT ADMINISTRATION (EDA)', '013'),
-
-    # Independent Federal Departments & National Endowments
     ('DEPARTMENT OF EDUCATION', 'DEPARTMENT OF EDUCATION (ED)', 'DEPARTMENT OF EDUCATION (ED)', '091'),
     ('DEPARTMENT OF INTERIOR', 'DEPARTMENT OF INTERIOR (DOI)', 'DEPARTMENT OF INTERIOR (DOI)', '014'),
     ('DEPARTMENT OF STATE US AGENCY FOR INTERNATIONAL DEVELOPMENT', 'UNITED STATES AGENCY FOR INTERNATIONAL DEVELOPMENT (USAID)', 'UNITED STATES AGENCY FOR INTERNATIONAL DEVELOPMENT (USAID)', '072'),
@@ -166,8 +107,7 @@ authority_reference_matrix = [
     ('US SOCIAL SECURITY ADMINISTRATION', 'SOCIAL SECURITY ADMINISTRATION (SSA)', 'SOCIAL SECURITY ADMINISTRATION (SSA)', '028'),
     ('NATIONAL ENDOWMENT FOR THE ARTS', 'NATIONAL FOUNDATION ON THE ARTS AND THE HUMANITIES', 'NATIONAL ENDOWMENT FOR THE ARTS', '413'),
     ('NATIONAL ENDOWMENT FOR THE HUMANITIES', 'NATIONAL FOUNDATION ON THE ARTS AND THE HUMANITIES', 'NATIONAL ENDOWMENT FOR THE HUMANITIES', '417'),
-
-    # Explicit Higher Ed, Foundations, and Non-Profit Overrides Forced to N/A
+    ('FACULTY FUND', 'N/A', 'N/A', 'FORCE_NON_FED'),
     ('US ENDOWMENT FOR FORESTRY AND COMMUNITIES', 'N/A', 'N/A', 'FORCE_NON_FED'),
     ('BCM TRANSLATIONAL RESEARCH INSTITUTE FOR SPACE HEALTH', 'N/A', 'N/A', 'FORCE_NON_FED'),
     ('THE TAMU SYSTEM HEALTH SCIENCE CENTER', 'N/A', 'N/A', 'FORCE_NON_FED'),
@@ -178,14 +118,27 @@ authority_reference_matrix = [
     ('TEXAS WORKFORCE COMMISSION', 'N/A', 'N/A', 'FORCE_NON_FED'),
     ('THE JOHN B PIERCE LABORATORY INC', 'N/A', 'N/A', 'FORCE_NON_FED')
 ]
-
 cursor.executemany("INSERT OR REPLACE INTO ref_sam_federal_hierarchy VALUES (?,?,?,?);", authority_reference_matrix)
 conn.commit()
 
-# ==========================================
-# 3. INGEST MANUAL SYSTEM EXCEL TABLES
-# ==========================================
-print("📥 Ingesting manual pre-award and post-award spreadsheet data layers...")
+# Clear and rebuild reporting scratch staging table
+cursor.execute("DROP TABLE IF EXISTS staging_sponsor_inputs;")
+cursor.execute("""
+    CREATE TABLE staging_sponsor_inputs (
+        string_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        oracle_sponsor_string TEXT UNIQUE,
+        cayuse_sponsor_string TEXT,
+        usaspending_top_tier TEXT DEFAULT 'N/A',
+        usaspending_sub_tier TEXT DEFAULT 'N/A',
+        sam_gov_certified_name TEXT DEFAULT 'N/A',
+        assigned_id TEXT DEFAULT 'N/A',
+        sponsor_taxonomy_class TEXT,
+        match_derivation_method TEXT
+    );
+""")
+conn.commit()
+
+# Loading manual portfolios
 master_df = pd.read_excel(MASTER_INPUT, sheet_name="Intermediate DATA")
 gsum_df = pd.read_excel(MASTER_INPUT, sheet_name="Grant Summary")
 
@@ -204,36 +157,8 @@ raw_cayuse_names = gsum_df['FLOW_THROUGH_SPONSOR'].dropna().unique()
 all_unique_strings = sorted(list(set(list(raw_oracle_names) + list(raw_cayuse_names))))
 filtered_strings = [s for s in all_unique_strings if str(s).upper() != 'NAN' and str(s).strip()]
 
-# ==========================================
-# 4. LIVE SAM.GOV API NETWORK GATEWAY
-# ==========================================
-def fetch_live_sam_hierarchy(query_string):
-    if SAM_API_KEY == "DEMO_KEY" or not SAM_API_KEY:
-        return None
-    params = {"api_key": SAM_API_KEY, "search_text": str(query_string).strip(), "status": "Active"}
-    try:
-        response = requests.get(SAM_FH_API_URL, params=params, timeout=4)
-        if response.status_code == 200:
-            data = response.json()
-            orgs = data.get('organizations', data.get('getFederalOrganizationsList', []))
-            if orgs and isinstance(orgs, list):
-                target_org = orgs[0]
-                top_tier = str(target_org.get('parentOrganization', {}).get('name', '')).upper().strip()
-                sub_tier = str(target_org.get('name', '')).upper().strip()
-                cgac = str(target_org.get('cgacCode', 'N/A')).strip()
-                if not top_tier or top_tier == "NONE": top_tier = sub_tier
-                return top_tier, sub_tier, cgac
-        return None
-    except Exception:
-        return None
-
-# ==========================================
-# 5. EXECUTE IDENTITY CHECK & VERIFICATION
-# ==========================================
-total_records = len(filtered_strings)
-print(f"🔗 Compiled {total_records} unique organization strings. Processing data gates...\n")
-
-for idx, string_item in enumerate(filtered_strings, 1):
+# Relational Join Loop Checking Persistent Database Cache Mappings
+for string_item in filtered_strings:
     org_upper = string_item.upper().strip()
     
     oracle_row_matches = master_df[master_df['Funding Source Name'] == string_item]
@@ -244,131 +169,127 @@ for idx, string_item in enumerate(filtered_strings, 1):
         cayuse_row_matches['AWARD_TERM_NAME'].astype(str).str.upper().str.contains('FEDERAL').any()
     )
 
+    assigned_id = "N/A"
+    
+    # 🧠 CORE CORRECTION: Enforce direct lookup into the ref_sam_entity_registry built by curation module
     if not is_federal_context:
-        top_agency, sub_agency, sam_name, taxonomy = "N/A", "N/A", org_upper, "NON_FEDERAL_RECIPIENT_ENTITY"
-        derivation_method = "SYSTEM_NAME_GATE"
-    else:
-        # Check our relational cache map first where portfolio-wide authority elements are locked
-        cursor.execute("SELECT top_tier_agency, sub_tier_agency, cgac_code FROM ref_sam_federal_hierarchy WHERE agency_string_key = ?;", (org_upper,))
-        cache_match = cursor.fetchone()
+        cursor.execute("SELECT verified_uei, verified_duns, sam_gov_legal_name, curation_status FROM ref_sam_entity_registry WHERE local_string_key = ?;", (org_upper,))
+        non_fed_match = cursor.fetchone()
         
-        if cache_match:
-            cached_top, cached_sub, cached_code = cache_match
+        if non_fed_match:
+            uei, duns, legal_name, status = non_fed_match
+            top_agency, sub_agency = "N/A", "N/A"
+            sam_name = legal_name if legal_name != "N/A" else "N/A"
+            assigned_id = uei if uei != "N/A" else duns
+            taxonomy = "NON_FEDERAL_RECIPIENT_ENTITY"
+            derivation_method = status
+        else:
+            top_agency, sub_agency, sam_name = "N/A", "N/A", "N/A"
+            taxonomy = "NON_FEDERAL_RECIPIENT_ENTITY"
+            derivation_method = "SYSTEM_TAXONOMY_GATE"
+    else:
+        cursor.execute("SELECT top_tier_agency, sub_tier_agency, cgac_code FROM ref_sam_federal_hierarchy WHERE agency_string_key = ?;", (org_upper,))
+        fed_cache_match = cursor.fetchone()
+        
+        if fed_cache_match:
+            cached_top, cached_sub, cached_code = fed_cache_match
             if cached_code == 'FORCE_NON_FED' or cached_top == 'N/A':
-                top_agency, sub_agency, sam_name, taxonomy = "N/A", "N/A", org_upper, "NON_FEDERAL_RECIPIENT_ENTITY"
-                derivation_method = "EXACT_AUTHORITY_SEED"
-            elif 'FALLBACK' in str(cached_code):
-                top_agency, sub_agency, sam_name, taxonomy = cached_top, cached_sub, cached_sub, "FEDERAL_FUNDING_AGENCY"
-                derivation_method = "RESCUE_FALLBACK"
+                cursor.execute("SELECT verified_uei, verified_duns, sam_gov_legal_name, curation_status FROM ref_sam_entity_registry WHERE local_string_key = ?;", (org_upper,))
+                override_match = cursor.fetchone()
+                
+                top_agency, sub_agency = "N/A", "N/A"
+                taxonomy = "NON_FEDERAL_RECIPIENT_ENTITY"
+                if override_match:
+                    uei, duns, legal_name, status = override_match
+                    sam_name = legal_name
+                    assigned_id = uei if uei != "N/A" else duns
+                    derivation_method = status
+                else:
+                    sam_name = "N/A"
+                    derivation_method = "EXACT_AUTHORITY_SEED"
             else:
-                top_agency, sub_agency, sam_name, taxonomy = cached_top, cached_sub, cached_sub, "FEDERAL_FUNDING_AGENCY"
+                top_agency, sub_agency, sam_name = cached_top, cached_sub, cached_sub
+                assigned_id = cached_code
+                taxonomy = "FEDERAL_FUNDING_AGENCY"
                 derivation_method = "EXACT_AUTHORITY_SEED"
         else:
-            # IDENTITY GATEKEEPER 2: Enhanced Text Screen for Private Higher Ed & Non-Profit Entities
-            has_corporate_suffix = any(sfx in org_upper for sfx in [" INC", " LLC", " CORP", " CO", " LTD", "UNIVERSITY", "FOUNDATION", "COLLEGE", "INSTITUTE", "CENTER", "SYSTEM", "HOSPITAL", "CLINIC"])
-            has_federal_keyword = any(fed in org_upper for fed in ["DEPARTMENT", "AGENCY", "COMMISSION", "COMMAND", "ADMINISTRATION", "BUREAU", "OFFICE", "LABORATORY", "NIH", "NSF", "NASA", "USDA", "AGRICULTURE", "ENDOWMENT", "SERVICE"])
-            
-            if has_corporate_suffix and not has_federal_keyword:
-                top_agency, sub_agency, sam_name, taxonomy = "N/A", "N/A", org_upper, "NON_FEDERAL_RECIPIENT_ENTITY"
-                derivation_method = "SYSTEM_NAME_GATE"
+            is_explicit_gov = any(word in org_upper for word in ["DEPARTMENT", "AGENCY", "COMMISSION", "COMMAND", "ADMINISTRATION", "BUREAU", "OFFICE", "LABORATORY", "NIH", "NSF", "NASA", "US "])
+            if is_explicit_gov:
+                top_agency, sub_agency = "FEDERAL_DEPARTMENT", "UNMAPPED_FEDERAL_AGENCY"
+                sam_name = sub_agency
+                taxonomy = "FEDERAL_FUNDING_AGENCY"
+                derivation_method = "RESCUE_FALLBACK"
             else:
-                # Gateway fallback loop addressing brand-new, unmapped lines
-                print(f" 🌐 [{idx} / {total_records}] Evaluating newly detected line via SAM.gov API: '{string_item}'...")
-                api_result = fetch_live_sam_hierarchy(string_item)
-                time.sleep(0.2)
-                
-                if api_result:
-                    top_agency, sub_agency, cgac_code = api_result
-                    sam_name = sub_agency
-                    taxonomy = "FEDERAL_FUNDING_AGENCY"
-                    derivation_method = "LIVE_API_RESOLVED"
-                    cursor.execute("INSERT OR REPLACE INTO ref_sam_federal_hierarchy VALUES (?, ?, ?, ?);", (org_upper, top_agency, sub_agency, cgac_code))
-                    conn.commit()
-                else:
-                    # IDENTITY GATEKEEPER 4: API returned None -> Evaluate for definitive federal markers
-                    is_explicit_gov = any(word in org_upper for word in ["DEPARTMENT", "AGENCY", "COMMISSION", "COMMAND", "ADMINISTRATION", "BUREAU", "OFFICE", "LABORATORY", "NIH", "NSF", "NASA", "FORCE", "ARMY", "NAVY", "COMMERCE", "ENERGY", "USDA", "AGRICULTURE", "ENDOWMENT", "SERVICE", "FED", "US "])
-                    
-                    if is_explicit_gov:
-                        if any(w in org_upper for w in ["AGRICULTURE", "USDA", "NIFA", "FOREST SERVICE"]):
-                            top_agency = "DEPARTMENT OF AGRICULTURE (USDA)"
-                            sub_agency = "NATIONAL INSTITUTE OF FOOD AND AGRICULTURE (NIFA)" if "FOOD" in org_upper or "NIFA" in org_upper else ("FOREST SERVICE (FS)" if "FOREST" in org_upper else "DEPARTMENT OF AGRICULTURE (USDA)")
-                        elif "ENDOWMENT" in org_upper:
-                            top_agency = "NATIONAL FOUNDATION ON THE ARTS AND THE HUMANITIES"
-                            sub_agency = "NATIONAL ENDOWMENT FOR THE ARTS" if "ARTS" in org_upper else "NATIONAL ENDOWMENT FOR THE HUMANITIES"
-                        elif "HOMELAND SECURITY" in org_upper or "DHS" in org_upper:
-                            top_agency, sub_agency = "DEPARTMENT OF HOMELAND SECURITY (DHS)", "DEPARTMENT OF HOMELAND SECURITY (DHS)"
-                        elif "SOCIAL SECURITY" in org_upper or "SSA" in org_upper:
-                            top_agency, sub_agency = "SOCIAL SECURITY ADMINISTRATION (SSA)", "SOCIAL SECURITY ADMINISTRATION (SSA)"
-                        elif "FISH AND WILDLIFE" in org_upper:
-                            top_agency, sub_agency = "DEPARTMENT OF INTERIOR (DOI)", "UNITED STATES FISH AND WILDLIFE SERVICE"
-                        elif "DEFENSE THREAT REDUCTION" in org_upper or "DTRA" in org_upper or "DEFENSE" in org_upper or "ARMY" in org_upper or "NAVY" in org_upper or "AIR FORCE" in org_upper or "ONR" in org_upper or "DARPA" in org_upper:
-                            top_agency = "DEPARTMENT OF DEFENSE (DOD)"
-                            sub_agency = "US ARMY RESEARCH LABORATORY (ARL)" if "LABORATORY" in org_upper else ("US ARMY RESEARCH OFFICE (ARO)" if "OFFICE" in org_upper else ("DEFENSE THREAT REDUCTION AGENCY (DTRA)" if "THREAT" in org_upper else "DEPARTMENT OF THE ARMY"))
-                        elif "HEALTH" in org_upper or "NIH" in org_upper or "CDC" in org_upper or "DHHS" in org_upper:
-                            top_agency, sub_agency = "DEPARTMENT OF HEALTH AND HUMAN SERVICES (HHS)", "NATIONAL INSTITUTES OF HEALTH (NIH)"
-                        elif "SCIENCE FOUNDATION" in org_upper or "NSF" in org_upper:
-                            top_agency, sub_agency = "NATIONAL SCIENCE FOUNDATION (NSF)", "NATIONAL SCIENCE FOUNDATION (NSF)"
-                        elif "ENERGY" in org_upper or "DOE" in org_upper:
-                            top_agency, sub_agency = "DEPARTMENT OF ENERGY (DOE)", "DEPARTMENT OF ENERGY (DOE)"
-                        elif "COMMERCE" in org_upper or "NIST" in org_upper or "NOAA" in org_upper:
-                            top_agency, sub_agency = "DEPARTMENT OF COMMERCE (DOC)", "DEPARTMENT OF COMMERCE (DOC)"
-                        elif "NASA" in org_upper or "SPACE" in org_upper:
-                            top_agency, sub_agency = "NATIONAL AERONAUTICS AND SPACE ADMINISTRATION (NASA)", "NASA HEADQUARTERS"
-                        else:
-                            top_agency, sub_agency = "FEDERAL_DEPARTMENT", "UNMAPPED_FEDERAL_AGENCY"
-                            
-                        sam_name = sub_agency
-                        taxonomy = "FEDERAL_FUNDING_AGENCY"
-                        cache_code = "FALLBACK_GOV_LOCK"
-                        derivation_method = "RESCUE_FALLBACK"
-                    
-                    else:
-                        
-                        top_agency, sub_agency = "N/A", "N/A"
-                        sam_name = "N/A"
-                        taxonomy = "NON_FEDERAL_RECIPIENT_ENTITY"
-                        cache_code = "FALLBACK_NON_FED_LOCK"
-                        derivation_method = "SYSTEM_NAME_GATE"
-                    
-                    cursor.execute("INSERT OR REPLACE INTO ref_sam_federal_hierarchy VALUES (?, ?, ?, ?);", (org_upper, top_agency, sub_agency, cache_code))
-                    conn.commit()
+                top_agency, sub_agency, sam_name = "N/A", "N/A", "N/A"
+                taxonomy = "NON_FEDERAL_RECIPIENT_ENTITY"
+                derivation_method = "SYSTEM_TAXONOMY_GATE"
 
     oracle_str = string_item if string_item in raw_oracle_names else "N/A"
     cayuse_str = string_item if string_item in raw_cayuse_names or string_item in raw_oracle_names else "N/A"
 
     cursor.execute("""
-        INSERT OR IGNORE INTO staging_sponsor_inputs (oracle_sponsor_string, cayuse_sponsor_string, usaspending_top_tier, usaspending_sub_tier, sam_gov_certified_name, sponsor_taxonomy_class, match_derivation_method)
-        VALUES (?, ?, ?, ?, ?, ?, ?);
-    """, (oracle_str, cayuse_str, top_agency, sub_agency, sam_name, taxonomy, derivation_method))
+        INSERT OR IGNORE INTO staging_sponsor_inputs (oracle_sponsor_string, cayuse_sponsor_string, usaspending_top_tier, usaspending_sub_tier, sam_gov_certified_name, assigned_id, sponsor_taxonomy_class, match_derivation_method)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+    """, (oracle_str, cayuse_str, top_agency, sub_agency, sam_name, assigned_id, taxonomy, derivation_method))
 
 conn.commit()
 
-# ==========================================
-# 6. GENERATE FINAL REPORT CROSSWALK GRID
-# ==========================================
-print("\n💾 Ingestion complete. Compressing views and extracting final load sheets...")
-final_query = """
+# Multi-Tab Worksheet Data Grid Generation
+master_crosswalk_df = pd.read_sql_query("""
     SELECT 
         oracle_sponsor_string AS ORACLE_SPONSOR_STRING,
         cayuse_sponsor_string AS CAYUSE_SPONSOR_STRING,
         usaspending_top_tier AS USASPENDING_TOP_TIER_AGENCY,
         usaspending_sub_tier AS USASPENDING_SUB_TIER_AGENCY,
         sam_gov_certified_name AS SAM_GOV_CERTIFIED_NAME,
+        assigned_id AS ASSIGNED_ID,
         sponsor_taxonomy_class AS SPONSOR_TAXONOMY_CLASS,
         match_derivation_method AS MATCH_DERIVATION_METHOD
     FROM staging_sponsor_inputs;
-"""
-master_crosswalk_df = pd.read_sql_query(final_query, conn)
+""", conn)
+
+fed_registry_df = pd.read_sql_query("""
+    SELECT DISTINCT top_tier_agency AS TOP_TIER_AGENCY, sub_tier_agency AS SUB_TIER_AGENCY, cgac_code AS CGAC_CODE 
+    FROM ref_sam_federal_hierarchy WHERE cgac_code != 'FORCE_NON_FED' AND top_tier_agency != 'N/A'
+    ORDER BY top_tier_agency ASC, sub_tier_agency ASC;
+""", conn)
+
+non_fed_registry_df = pd.read_sql_query("""
+    SELECT local_string_key AS LOCAL_SPONSOR_STRING, verified_uei AS VERIFIED_UEI, verified_duns AS VERIFIED_DUNS, sam_gov_legal_name AS SAM_GOV_LEGAL_NAME, curation_status AS DERIVATION_SOURCE
+    FROM ref_sam_entity_registry ORDER BY local_string_key ASC;
+""", conn)
 conn.close()
 
+rules_df = pd.DataFrame([
+    ["EXACT_AUTHORITY_SEED", "Pre-Mapped Core Matches", "Locks hardcoded federal commands and verified authority seeds from the local master catalog."],
+    ["VERIFIED_VIA_OFFLINE_NAME_MATCH", "sam.xlsx Global Name Index Join", "Alphanumerically verified and resolved the entity name against the 40MB shared drive dataset."],
+    ["VERIFIED_VIA_SUPPLIER_DUNS", "OTBI Supplier File Join", "Cross-examined internal supplier metrics against the offline global tracking registry."],
+    ["VERIFIED_VIA_AI_INPUT", "Validated AI Key Entry", "Successfully matched and verified an AI-predicted UEI code against the master file."],
+    ["SYSTEM_TAXONOMY_GATE", "Generic Corporate Text Suffix Interception", "Flags non-federal context lines and clears direct federal operating column variables to N/A."]
+], columns=["RULE_ID", "ROUTING_GATEWAYS", "LOGIC_DESCRIPTION"])
+
 try:
-    with pd.ExcelWriter(OUTPUT_FILE, engine="openpyxl") as excel_writer:
-        master_crosswalk_df.to_excel(excel_writer, sheet_name="Master Sponsor Crosswalk", index=False)
-        worksheet = excel_writer.sheets["Master Sponsor Crosswalk"]
-        cell_range = f"A1:G{len(master_crosswalk_df) + 1}"
-        excel_table = Table(displayName="MasterSponsorCrosswalk", ref=cell_range)
-        excel_table.tableStyleInfo = TableStyleInfo(name="TableStyleMedium9", showRowStripes=True)
-        worksheet.add_table(excel_table)
-    print(f"🎉 Success! 1-to-1 master crosswalk naming grid successfully saved to '{OUTPUT_FILE}'!")
+    with pd.ExcelWriter(OUTPUT_FILE, engine="openpyxl") as writer:
+        master_crosswalk_df.to_excel(writer, sheet_name="Master Sponsor Crosswalk", index=False)
+        t1 = Table(displayName="MasterSponsorCrosswalk", ref=f"A1:H{len(master_crosswalk_df) + 1}")
+        t1.tableStyleInfo = TableStyleInfo(name="TableStyleMedium9", showRowStripes=True)
+        writer.sheets["Master Sponsor Crosswalk"].add_table(t1)
+        
+        fed_registry_df.to_excel(writer, sheet_name="Federal_Hierarchy_Registry", index=False)
+        t2 = Table(displayName="FederalHierarchyRegistry", ref=f"A1:C{len(fed_registry_df) + 1}")
+        t2.tableStyleInfo = TableStyleInfo(name="TableStyleMedium9", showRowStripes=True)
+        writer.sheets["Federal_Hierarchy_Registry"].add_table(t2)
+        
+        non_fed_registry_df.to_excel(writer, sheet_name="Non_Federal_Entity_Registry", index=False)
+        t3 = Table(displayName="NonFederalEntityRegistry", ref=f"A1:E{len(non_fed_registry_df) + 1}")
+        t3.tableStyleInfo = TableStyleInfo(name="TableStyleMedium9", showRowStripes=True)
+        writer.sheets["Non_Federal_Entity_Registry"].add_table(t3)
+        
+        rules_df.to_excel(writer, sheet_name="RULES", index=False)
+        t4 = Table(displayName="RULES", ref=f"A1:C{len(rules_df) + 1}")
+        t4.tableStyleInfo = TableStyleInfo(name="TableStyleMedium9", showRowStripes=True)
+        writer.sheets["RULES"].add_table(t4)
+        
+    print(f"🎉 Success! Multi-tab relational data grid successfully generated and saved to '{OUTPUT_FILE}'!")
 except PermissionError:
-    print(f"❌ Execution Blocked: Close '{OUTPUT_FILE}' in Excel before running this script.")
+    print(f"❌ Execution Blocked: Close '{OUTPUT_FILE}' before running this script.")
