@@ -12,6 +12,9 @@ secrets.json
 *Grant Summary*.xlsx
 *Grant Summary*.xls
 *Ecosystem_True_Up_Audit.xlsx
+*2026_7_1_CAYUSE*.xlsx
+*CAYUSE_ORACLE*.xlsx
+*Sponsor_Ecosystem*.xlsx
 
 # Block local desktop SQLite relational staging databases
 *.db
